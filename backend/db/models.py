@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     String,
     Text,
 )
@@ -23,6 +24,28 @@ class Difficulty(enum.Enum):
     Easy = "Easy"
     Medium = "Medium"
     Hard = "Hard"
+
+
+class SessionMode(enum.Enum):
+    normal = "normal"
+    interview = "interview"
+
+
+class SessionStatus(enum.Enum):
+    in_progress = "in_progress"
+    completed = "completed"
+
+
+class MessageRole(enum.Enum):
+    user = "user"
+    agent = "agent"
+
+
+class MessageType(enum.Enum):
+    question = "question"
+    hint = "hint"
+    code_update = "code_update"
+    system = "system"
 
 
 class Problem(Base):
@@ -67,3 +90,65 @@ class TestCase(Base):
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     problem: Mapped["Problem"] = relationship("Problem", back_populates="test_cases")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    problem_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("problems.id"),
+        nullable=False,
+    )
+    user_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    mode: Mapped[SessionMode] = mapped_column(Enum(SessionMode, name="session_mode_enum"), nullable=False)
+    status: Mapped[SessionStatus] = mapped_column(
+        Enum(SessionStatus, name="session_status_enum"),
+        nullable=False,
+        default=SessionStatus.in_progress,
+    )
+    hint_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    final_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    problem: Mapped["Problem"] = relationship("Problem")
+    messages: Mapped[list["SessionMessage"]] = relationship(
+        "SessionMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="SessionMessage.created_at",
+    )
+
+
+class SessionMessage(Base):
+    __tablename__ = "session_messages"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+    )
+    session_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[MessageRole] = mapped_column(Enum(MessageRole, name="message_role_enum"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[MessageType] = mapped_column(
+        Enum(MessageType, name="message_type_enum"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    session: Mapped["Session"] = relationship("Session", back_populates="messages")

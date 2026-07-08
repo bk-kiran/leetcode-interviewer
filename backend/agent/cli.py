@@ -41,7 +41,6 @@ def run_cli() -> None:
         "current_code": "",
         "hint_count": 0,
         "user_input": "",
-        "is_hint_request": False,
         "last_response": "",
     }
 
@@ -59,11 +58,10 @@ def run_cli() -> None:
             continue
 
         if raw.lower() == "hint":
-            state["user_input"] = ""
-            state["is_hint_request"] = True
+            state["hint_count"] += 1
+            state["user_input"] = "Please give me a hint."
         else:
             state["user_input"] = raw
-            state["is_hint_request"] = False
 
         prev_node = None
         final_state = state

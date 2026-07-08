@@ -17,20 +17,34 @@ Their current code (may be empty or incomplete):
 {current_code}
 ```
 
-They have received {hint_count} hint(s) so far this session.
+Your job is to help them think, never to hand them the solution. For this response, \
+follow this guidance on how specific to be:
+{escalation_instruction}
 
-Your job is to help them think, never to hand them the solution:
-- If this is their 1st hint (hint_count == 1): give a vague, Socratic nudge — ask a \
-guiding question or point at the general category of thing to consider, without \
-naming the specific algorithm, data structure, or pattern.
-- If this is their 2nd+ hint (hint_count >= 2): be more concrete — name the general \
-pattern or data structure family (e.g. "a hash map", "two pointers"), and briefly say \
-why it fits, but do not lay out the algorithm step by step.
-- If they ask a regular question rather than requesting a hint, answer at a level of \
-specificity consistent with how many hints they've already received.
-- If asked directly for the full solution or full code, politely decline and instead \
-give the most concrete hint appropriate to the current hint count.
-Never output a complete working solution. Keep responses to 2-4 sentences."""
+This applies whether they asked a direct question or explicitly requested a hint. If \
+asked directly for the full solution or complete code, politely decline and instead \
+respond at the level of specificity described above.
+
+Never output a complete working solution. Never mention hint numbers or counts, and \
+never say things like "this is your first/second/next hint" — the level of detail is \
+already decided by the guidance above, so just answer accordingly without narrating \
+which hint this is. Keep responses to 2-4 sentences."""
+
+VAGUE_ESCALATION_INSTRUCTION = (
+    "Give a vague, Socratic nudge: ask a guiding question or gesture at the general "
+    "category of thing to consider, without naming the specific algorithm, data "
+    "structure, or pattern."
+)
+
+CONCRETE_ESCALATION_INSTRUCTION = (
+    'Be concrete: name the general pattern or data structure family (e.g. "a hash '
+    'map", "two pointers"), and briefly explain why it fits, but do not lay out the '
+    "full algorithm step by step."
+)
+
+
+def _escalation_instruction(hint_count: int) -> str:
+    return CONCRETE_ESCALATION_INSTRUCTION if hint_count >= 2 else VAGUE_ESCALATION_INSTRUCTION
 
 
 class AgentState(TypedDict):
@@ -39,7 +53,6 @@ class AgentState(TypedDict):
     current_code: str
     hint_count: int
     user_input: str
-    is_hint_request: bool
     last_response: str
 
 
@@ -48,40 +61,41 @@ def idle(state: AgentState) -> AgentState:
 
 
 def answer_or_hint(state: AgentState) -> AgentState:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    """Call Claude with the problem, current code, hint count, and the user's message.
 
-    hint_count = state["hint_count"] + 1 if state["is_hint_request"] else state["hint_count"]
+    hint_count reflects the count as of this call — incrementing it (when the user
+    explicitly asked for a hint) is the caller's responsibility, done before invoking
+    the graph, so the escalation logic here always sees the correct, already-updated
+    count.
+    """
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     system = SYSTEM_PROMPT.format(
         title=state["problem"]["title"],
         prompt=state["problem"]["prompt"],
         current_code=state["current_code"] or "(no code written yet)",
-        hint_count=hint_count,
+        escalation_instruction=_escalation_instruction(state["hint_count"]),
     )
-
-    user_message = "Please give me a hint." if state["is_hint_request"] else state["user_input"]
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=512,
         system=system,
-        messages=state["messages"] + [{"role": "user", "content": user_message}],
+        messages=state["messages"] + [{"role": "user", "content": state["user_input"]}],
     )
     reply = next(b.text for b in response.content if b.type == "text")
 
     return {
         **state,
-        "hint_count": hint_count,
         "messages": state["messages"]
-        + [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}],
+        + [{"role": "user", "content": state["user_input"]}, {"role": "assistant", "content": reply}],
         "last_response": reply,
         "user_input": "",
-        "is_hint_request": False,
     }
 
 
 def route_from_idle(state: AgentState) -> str:
-    return "answer_or_hint" if state["user_input"] or state["is_hint_request"] else END
+    return "answer_or_hint" if state["user_input"] else END
 
 
 def build_graph():
@@ -92,3 +106,29 @@ def build_graph():
     graph.add_conditional_edges("idle", route_from_idle, {"answer_or_hint": "answer_or_hint", END: END})
     graph.add_edge("answer_or_hint", "idle")
     return graph.compile()
+
+
+def run_agent_turn(
+    problem: dict,
+    messages: list[dict],
+    current_code: str,
+    hint_count: int,
+    user_input: str,
+) -> str:
+    """Run one turn of the Normal-mode agent graph and return the agent's text reply.
+
+    `messages` is the prior conversation history (Claude message format: role
+    "user"/"assistant"), not including `user_input` itself. `hint_count` must already
+    reflect any increment for this turn — the graph does not mutate it.
+    """
+    app = build_graph()
+    state: AgentState = {
+        "problem": problem,
+        "messages": messages,
+        "current_code": current_code,
+        "hint_count": hint_count,
+        "user_input": user_input,
+        "last_response": "",
+    }
+    result = app.invoke(state)
+    return result["last_response"]
