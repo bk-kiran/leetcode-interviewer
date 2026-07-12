@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from db.models import Problem, TestCase
@@ -12,6 +13,14 @@ from routes.sessions import router as sessions_router
 from schemas import ProblemDetail, ProblemSummary, SubmitRequest, SubmitResponse, TestCaseOut
 
 app = FastAPI(title="Interview Agent API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(sessions_router)
 
 
