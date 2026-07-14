@@ -49,3 +49,20 @@ class SubmitResponse(BaseModel):
     problem_id: str
     results: list[TestCaseResult]
     all_passed: bool
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+class SpeechMark(BaseModel):
+    time: int
+    type: str
+    start: int
+    end: int
+    value: str
+
+
+class TTSWithMarksResponse(BaseModel):
+    audio_base64: str
+    marks: list[SpeechMark]
