@@ -12,6 +12,7 @@ from db.sessions_crud import (
     add_message,
     complete_session,
     create_session,
+    delete_message_pair,
     get_session_with_messages,
     increment_hint_count,
     update_session_code,
@@ -52,6 +53,8 @@ class MessageRequest(BaseModel):
 class MessageResponse(BaseModel):
     response: str
     hint_count: int
+    user_message_id: str
+    agent_message_id: str
 
 
 class CodeUpdateResponse(BaseModel):
@@ -91,6 +94,11 @@ class SessionMessageOut(BaseModel):
 class SessionDetailResponse(BaseModel):
     session: SessionOut
     messages: list[SessionMessageOut]
+
+
+class DeleteMessageResponse(BaseModel):
+    deleted: bool
+    deleted_ids: list[str]
 
 
 # --- helpers ---
@@ -166,7 +174,9 @@ def post_message(session_id: str, req: MessageRequest, db: OrmSession = Depends(
     current_code = session.final_code or ""
     problem = {"title": session.problem.title, "prompt": session.problem.prompt}
 
-    add_message(db, session_id, role=MessageRole.user, content=req.content, message_type=req.message_type)
+    user_message = add_message(
+        db, session_id, role=MessageRole.user, content=req.content, message_type=req.message_type
+    )
 
     if req.message_type == MessageType.code_update:
         update_session_code(db, session_id, req.content)
@@ -186,9 +196,14 @@ def post_message(session_id: str, req: MessageRequest, db: OrmSession = Depends(
         user_input=req.content,
     )
 
-    add_message(db, session_id, role=MessageRole.agent, content=reply, message_type=req.message_type)
+    agent_message = add_message(db, session_id, role=MessageRole.agent, content=reply, message_type=req.message_type)
 
-    return MessageResponse(response=reply, hint_count=hint_count)
+    return MessageResponse(
+        response=reply,
+        hint_count=hint_count,
+        user_message_id=user_message.id,
+        agent_message_id=agent_message.id,
+    )
 
 
 @router.post("/{session_id}/submit", response_model=SessionSubmitResponse)
@@ -226,3 +241,13 @@ def get_session(session_id: str, db: OrmSession = Depends(get_db)):
             for m in session.messages
         ],
     )
+
+
+@router.delete("/{session_id}/message/{message_id}", response_model=DeleteMessageResponse)
+def delete_message(session_id: str, message_id: str, db: OrmSession = Depends(get_db)):
+    try:
+        deleted_ids = delete_message_pair(db, session_id, message_id)
+    except NoResultFound:
+        raise HTTPException(status_code=404, detail="Session or message not found")
+
+    return DeleteMessageResponse(deleted=True, deleted_ids=deleted_ids)

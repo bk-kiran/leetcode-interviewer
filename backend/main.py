@@ -16,6 +16,7 @@ from db.session import get_db
 from judge0_service import run_submission
 from polly_client import get_speech_marks, synthesize_speech
 from routes.sessions import router as sessions_router
+from routes.transcribe import router as transcribe_router
 from schemas import (
     ProblemDetail,
     ProblemSummary,
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(sessions_router)
+app.include_router(transcribe_router)
 
 
 @app.get("/health")

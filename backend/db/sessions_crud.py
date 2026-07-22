@@ -80,3 +80,30 @@ def get_session_with_messages(db: OrmSession, session_id: str) -> Session:
         .filter(Session.id == session_id)
         .one()
     )
+
+
+def delete_message_pair(db: OrmSession, session_id: str, message_id: str) -> list[str]:
+    """Deletes a message and, if it's a user message immediately followed by
+    an agent message in the ordered history, that paired response too.
+    Raises NoResultFound if the session or the message doesn't exist."""
+    session = get_session_with_messages(db, session_id)
+    messages = session.messages  # ordered by created_at via the relationship
+
+    target_index = next((i for i, m in enumerate(messages) if m.id == message_id), None)
+    if target_index is None:
+        raise NoResultFound(f"Message {message_id} not found in session {session_id}")
+
+    to_delete = [messages[target_index]]
+    next_index = target_index + 1
+    if (
+        messages[target_index].role == MessageRole.user
+        and next_index < len(messages)
+        and messages[next_index].role == MessageRole.agent
+    ):
+        to_delete.append(messages[next_index])
+
+    deleted_ids = [m.id for m in to_delete]
+    for m in to_delete:
+        db.delete(m)
+    db.commit()
+    return deleted_ids
